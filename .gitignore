@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+.env
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime data — each agent instance has its own journal
+data/journal.jsonl
+data/*.tmp
+
+# Generated reports
+reflection-report.*
+advise-report.*
+*.report.html
+*.report.md
