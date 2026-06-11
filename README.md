@@ -123,6 +123,68 @@ chmod +x scripts/*.sh
 ```
 
 That's it. No build step, no native compilation. The skill is a Python 3.9+ module wrapped by a bash CLI for easy invocation.
+## Quick test (try it in 30 seconds)
+
+After the 3-step install above, run the demo mode (no private key, no RPC, no setup):
+
+```bash
+bash scripts/iterate.sh --demo
+```
+
+You should see a printed report. The demo uses synthetic data, so it works offline.
+
+To run a real check on a Pharos transaction, wallet, or token, replace the placeholder:
+
+```bash
+bash scripts/iterate.sh --strategy ./strategy.json --iterations 50
+```
+
+## Use in an AI agent (Claude Code / Codex / OpenClaw / Pharos Agent Center)
+
+The skill ships with a `SKILL.md` that AI agents auto-load. Once installed in your agent, just ask in natural language — the agent will read `SKILL.md` and run the bash script for you.
+
+```text
+"Review my last 10 trades and tell me what to tune."
+```
+
+The agent will run `bash scripts/iterate.sh --demo` (or the live command with the address you gave) and read the result back to you.
+
+### Install in your agent
+
+**Option A — Pharos Agent Center** (one-line install):
+
+```bash
+# from inside any agent that has the Pharos Agent Center CLI
+pharos-skill install https://github.com/misturahadegoke/recimp
+```
+
+**Option B — OpenClaw / Claude Code / Codex** (one-line via npm):
+
+```bash
+npx skills add https://github.com/misturahadegoke/recimp
+```
+
+**Option C — Manual install** (drop into your agent's skills directory):
+
+```bash
+# Clone the skill
+git clone https://github.com/misturahadegoke/recimp
+cd recimp
+
+# Claude Code: copy to ~/.claude/skills/
+mkdir -p ~/.claude/skills/recimp
+cp -r . ~/.claude/skills/recimp/
+
+# Codex: copy to ~/.codex/skills/
+mkdir -p ~/.codex/skills/recimp
+cp -r . ~/.codex/skills/recimp/
+
+# OpenClaw: copy to ~/.openclaw/skills/
+mkdir -p ~/.openclaw/skills/recimp
+cp -r . ~/.openclaw/skills/recimp/
+
+# Then restart the agent — the skill will be auto-loaded.
+```
 ## Usage
 
 The CLI exposes four subcommands.
