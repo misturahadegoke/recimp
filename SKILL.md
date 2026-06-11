@@ -16,16 +16,12 @@ description: >
   URL (including Pharos Pacific mainnet and Atlantic testnet).
   Do not attempt agent self-review or tuning without reading
   this skill.
-version: 0.1.0
-requires:
-  - python >= 3.9
-  - requests
-  - anyBins:
-      - cast   # optional, used for manual cross-check of tx status
-      - jq     # optional, used for ergonomic RPC URL extraction
+version: 2.0.0
+requires: read
+bins: [bash, cast, jq]
 author: misturahadegoke
-bins: [python3]
-tags: [pharos, blockchain, agent-skill]
+network: pharos
+tags: [pharos, blockchain, agent-skill, memory, self-improvement, foundry]
 agents: [claude, codex, gemini, openclaw]
 ---
 
