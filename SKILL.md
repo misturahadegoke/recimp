@@ -1,5 +1,5 @@
 ---
-name: recursive-self-improvement
+name: recimp
 description: >
   REQUIRED for any task where an AI agent needs to record its
   onchain actions, review its own performance per strategy, and
@@ -9,44 +9,34 @@ description: >
   "show me your trade history", "compute my win rate", "what's
   my drawdown", or wants a structured per-strategy report
   including realized P&L, win rate, gas efficiency, and a
-  rule-based tuning recommendation. Use the bundled
-  `src/recimp.py` engine which writes to a JSONL journal
+  rule-based tuning recommendation. Uses Python 3.9+ with the
+  JSON-RPC client bundled in `src/rpc.py` (no Foundry, no
+  third-party Python deps required). Writes to a JSONL journal
   on disk and reads back via `eth_getTransactionByHash` /
   `eth_getTransactionReceipt` against any EVM-compatible RPC
   URL (including Pharos Pacific mainnet and Atlantic testnet).
-  Do not attempt agent self-review or tuning without reading
-  this skill.
-version: 2.0.0
+  Read-only — never accepts a private key.
+version: 3.0.0
 requires: read
-bins: [bash, cast, jq]
+bins: [python3, curl]
 author: misturahadegoke
 network: pharos
-tags: [pharos, blockchain, agent-skill, memory, self-improvement, foundry]
-agents: [claude, codex, gemini, openclaw]
+tags: [pharos, blockchain, agent-skill, memory, self-improvement, json-rpc]
+agents: [claude, codex, gemini, openclaw, anvita-flow]
 ---
 
 
-# Recursive Self-Improvement Skill
+# RecImp — Recursive Self-Improvement Skill
 
 A meta-skill for AI agents that trade onchain: log every action,
-review the journal, and propose parameter tuning based on the
-review.
+review the journal, and propose parameter tuning based on the review.
 
-The skill ships four pieces:
+The skill ships four subcommands:
 
-1. **Journal** — an append-only `data/journal.jsonl` file where
-   the agent records every trade (entry: timestamp, strategy,
-   action, tx hash, expected P&L, params used).
-2. **Verifier** — re-reads each journal entry's tx hash via
-   `eth_getTransactionReceipt` and attaches confirmation status,
-   block, and actual gas used.
-3. **Reflection engine** — for each strategy, computes realized
-   P&L, win rate, average gas cost, max drawdown, and a
-   rule-based health verdict.
-4. **Tuning advisor** — based on the rolling stats, proposes
-   concrete parameter changes (e.g. "raise max_position_size by
-   25%" or "tighten stop_loss to 2.5%") with a confidence 0–1
-   and a human-readable rationale.
+1. **`record`** — write one trade to `data/journal.jsonl` (timestamp, strategy, action, tx hash, expected P&L, params used).
+2. **`verify`** — re-read each entry's tx hash via `eth_getTransactionReceipt` against any EVM-compatible JSON-RPC endpoint and attach confirmation status, block, and gas used.
+3. **`reflect`** — per-strategy stats: realized P&L, win rate, max drawdown, average gas, plus a rule-based verdict (`HEALTHY` / `UNDERPERFORMING` / `BROKEN` / `INSUFFICIENT_DATA`).
+4. **`advise`** — propose concrete parameter changes with a confidence 0–1 and a human-readable rationale.
 
 ## When to use
 
@@ -57,72 +47,112 @@ The skill ships four pieces:
 
 ## When NOT to use
 
-- Strategy backtesting (this skill reads live journal entries,
-  not historical simulation data).
-- Cross-strategy portfolio optimization (use a dedicated
-  portfolio optimizer).
+- Strategy backtesting (this skill reads live journal entries, not historical simulation data).
+- Cross-strategy portfolio optimization (use a dedicated portfolio optimizer).
 - Off-chain-only strategies (the verifier is on-chain-aware).
+- Sending transactions (this skill is read-only — use the Pharos Skill Engine for writes).
 
-## Inputs
+## Prerequisites
 
-The CLI exposes four subcommands:
+```bash
+python3 --version   # 3.9+
+```
 
-### `recimp record`
+The skill uses only the Python standard library (`urllib.request`, `json`, `argparse`, `dataclasses`). **No `pip install`, no Foundry, no third-party packages.** The runtime only needs `python3`.
 
-| Field             | Required | Description                                       |
-|-------------------|----------|---------------------------------------------------|
-| `--strategy`      | yes      | Strategy name (e.g. `stablecoin-farming`)         |
-| `--action`        | yes      | One of `OPEN`, `CLOSE`, `REBALANCE`, `CLAIM`      |
-| `--tx-hash`       | no       | 0x tx hash (verify later)                         |
-| `--symbol`        | no       | Asset symbol (e.g. `USDC-PROS LP`)                |
-| `--pnl-usd`       | no       | Realized P&L in USD (for CLOSE actions)           |
-| `--params`        | no       | JSON-encoded parameter dict at the time of trade  |
-| `--note`          | no       | Free-form note                                    |
+For optional manual cross-checks via Foundry's `cast`, install Foundry separately:
 
-### `recimp verify`
+```bash
+curl -L https://foundry.paradigm.xyz | bash && foundryup
+cast --version
+```
 
-| Field             | Required | Description                                       |
-|-------------------|----------|---------------------------------------------------|
-| `--rpc-url`       | yes      | JSON-RPC endpoint                                 |
-| `--strategy`      | no       | Only verify a specific strategy                   |
-| `--since`         | no       | Only verify entries newer than this ISO 8601 ts   |
+The skill is **read-only** — no private key is required or accepted.
 
-### `recimp reflect`
+## Network configuration
 
-| Field             | Required | Description                                       |
-|-------------------|----------|---------------------------------------------------|
-| `--rpc-url`       | yes      | JSON-RPC endpoint (for native price reference)     |
-| `--strategy`      | no       | Only reflect on a specific strategy               |
-| `--window`        | no       | Lookback window in days (default 30)              |
-| `--format`        | no       | `text`, `json`, `markdown`, `html`                |
+Network RPC URLs and chain IDs are sourced from `assets/networks.json` (canonical Pharos Skill Engine schema). To add a new network, append a new object to the `networks` array and update `defaultNetwork` if needed.
 
-### `recimp advise`
+| Network | Chain ID | RPC URL | Native |
+|---|---|---|---|
+| Pharos Atlantic Testnet | `688689` | `https://atlantic.dplabs-internal.com` | PHRS |
+| Pharos Pacific Mainnet | `1672` | `https://rpc.pharos.xyz` | PROS |
 
-| Field             | Required | Description                                       |
-|-------------------|----------|---------------------------------------------------|
-| `--rpc-url`       | yes      | JSON-RPC endpoint (for native price reference)    |
-| `--strategy`      | no       | Only advise a specific strategy                   |
-| `--format`        | no       | `text`, `json`, `markdown`, `html`                |
+CLI flag conventions:
+
+- `--chain mainnet` → Pacific (1672)
+- `--chain testnet` → Atlantic (688689)
+- `--rpc-url <URL>` → override per call
+
+## Inputs (CLI)
+
+### `python src/recimp.py record`
+
+| Field | Required | Description |
+|---|---|---|
+| `--strategy` | yes | Strategy name (e.g. `stablecoin-farming`) |
+| `--action` | yes | `OPEN` / `CLOSE` / `REBALANCE` / `CLAIM` / `INIT` |
+| `--tx-hash` | no | 0x tx hash (verified later) |
+| `--symbol` | no | Asset symbol (e.g. `USDC`) |
+| `--pnl-usd` | no | Realized P&L in USD (for `CLOSE`) |
+| `--params` | no | JSON-encoded parameter dict at the time of trade |
+| `--note` | no | Free-form note |
+| `--journal PATH` | no | Override journal location |
+
+### `python src/recimp.py verify`
+
+| Field | Required | Description |
+|---|---|---|
+| `--rpc-url URL` | yes | JSON-RPC endpoint |
+| `--chain mainnet\|testnet` | no | Network short name |
+| `--strategy NAME` | no | Only verify one strategy |
+| `--since ISO` | no | Only entries newer than this ISO 8601 timestamp |
+
+### `python src/recimp.py reflect` / `advise`
+
+| Field | Required | Description |
+|---|---|---|
+| `--rpc-url URL` | no | JSON-RPC endpoint (only used by `reflect` for context; `advise` is offline) |
+| `--chain mainnet\|testnet` | no | Network short name |
+| `--strategy NAME` | no | Only reflect on / advise for one strategy |
+| `--window N` | no | Lookback in days (default `30`, `0` disables) |
+| `--format text\|json\|markdown\|html` | no | Output format |
+| `--out PATH` | no | Write to file instead of stdout |
 
 ## Outputs
 
-A structured report with:
+`reflect` and `advise` both emit the same shape (per-strategy) with optional
+tuning recommendations appended under `recommendations[]` in JSON mode, or
+inline under "Recommended tuning" in HTML/Markdown mode.
 
-- Per-strategy stats: trade count, win rate, realized P&L,
-  average gas, max drawdown, current params.
-- Per-strategy health verdict: `HEALTHY` / `UNDERPERFORMING` /
-  `BROKEN` / `INSUFFICIENT_DATA`.
-- Per-strategy tuning recommendation: list of param changes,
-  each with `param`, `old`, `new`, `confidence`, `rationale`.
+Per-strategy fields:
+
+- `strategy`, `trade_count`, `verified_count`, `close_count`
+- `win_count`, `realized_pnl_usd`, `avg_pnl_usd`, `max_drawdown_usd`
+- `total_gas`, `avg_gas_per_tx`, `first_seen`, `last_seen`
+- `last_params` — most recent recorded param dict
+- `verdict` — `HEALTHY` / `UNDERPERFORMING` / `BROKEN` / `INSUFFICIENT_DATA`
+- `verdict_reason` — human-readable explanation
+- `recommendations[]` — `[{param, old, new, confidence, rationale}]` (advise mode only)
+
+## Capability index
+
+| User need | Capability | Detailed instructions |
+|---|---|---|
+| Log a trade | `python src/recimp.py record --strategy ... --action ...` | See `Usage → 1. record` below |
+| Confirm on-chain settlement | `python src/recimp.py verify --rpc-url ...` | See `Usage → 2. verify` |
+| Per-strategy P&L report | `python src/recimp.py reflect --rpc-url ...` | Output in `text` / `json` / `markdown` / `html` |
+| Tuning recommendation | `python src/recimp.py advise` | Offline; same data sources as `reflect` plus rule-based advisor |
+| Cross-check tx status with Foundry | `cast receipt 0xHASH --rpc-url ...` | Optional; not required by the skill |
 
 ## Quick start
 
 ```bash
-# 1. Install
-pip install -r requirements.txt
+# 1. No install — pure stdlib. (Optional) Foundry for manual checks:
+#    curl -L https://foundry.paradigm.xyz | bash && foundryup
 
 # 2. Record a trade
-python src/recimp.py record \
+python3 src/recimp.py record \
   --strategy stablecoin-farming \
   --action OPEN \
   --tx-hash 0xYourTxHash \
@@ -130,121 +160,89 @@ python src/recimp.py record \
   --params '{"size_usd": 1000, "max_slippage_bps": 30}'
 
 # 3. Verify on-chain confirmations
-python src/recimp.py verify \
-  --rpc-url https://rpc.pharos.xyz
+python3 src/recimp.py verify \
+  --rpc-url https://rpc.pharos.xyz \
+  --chain mainnet
 
 # 4. Reflect on performance
-python src/recimp.py reflect \
-  --rpc-url https://rpc.pharos.xyz
+python3 src/recimp.py reflect \
+  --chain mainnet \
+  --format markdown
 
 # 5. Get tuning advice
-python src/recimp.py advise \
-  --rpc-url https://rpc.pharos.xyz
+python3 src/recimp.py advise \
+  --format text
+```
+
+## Usage — annotated session
+
+```bash
+# Open a position
+python3 src/recimp.py record --strategy stablecoin-farming --action OPEN \
+  --tx-hash 0xabc... --symbol USDC \
+  --params '{"size_usd": 1000, "stop_loss_bps": 200}'
+
+# Close it (pnl_usd required to compute realized P&L)
+python3 src/recimp.py record --strategy stablecoin-farming --action CLOSE \
+  --tx-hash 0xdef... --symbol USDC --pnl-usd 50.0 \
+  --params '{"size_usd": 1000, "stop_loss_bps": 200}'
+
+# Re-read confirmations
+python3 src/recimp.py verify --rpc-url https://rpc.pharos.xyz --chain mainnet
+
+# Per-strategy report (text)
+python3 src/recimp.py reflect --chain mainnet --format text
+
+# Tuning recommendations (markdown, to a file)
+python3 src/recimp.py advise --format markdown --out advise-report.md
 ```
 
 ## Agent invocation pattern
 
-When the agent executes a trade, it should immediately call
-`recimp record` to log it. Periodically (or on user request),
-it calls `recimp verify && recimp reflect && recimp advise`,
-surfaces the result, and (with user approval) applies the
-tuning.
+After every onchain action, call `record`. Periodically (or on user request),
+call `verify` then `reflect` then `advise` — and surface the verdict, stats,
+and tuning recommendations in your reply.
 
-A typical session:
-
-> User: "Review your trading performance on Pharos."
+> **User:** "Review your trading performance on Pharos."
 >
-> Agent:
-> 1. Runs `recimp verify --rpc-url https://rpc.pharos.xyz`
-> 2. Runs `recimp reflect --rpc-url https://rpc.pharos.xyz`
-> 3. Runs `recimp advise --rpc-url https://rpc.pharos.xyz`
-> 4. Surfaces the report: "Over 30 days, strategy X had 12
->    trades, 67% win rate, +$342 realized, 0.003 ETH gas.
->    Verdict: HEALTHY. Tuning recommendation: raise
->    max_position_size from $1000 to $1250 (conf 0.62)."
+> **Agent:**
+> 1. `python3 src/recimp.py verify --rpc-url https://rpc.pharos.xyz --chain mainnet`
+> 2. `python3 src/recimp.py reflect --chain mainnet --format text`
+> 3. `python3 src/recimp.py advise --format text`
+> 4. Replies: "stablecoin-farming — HEALTHY, 12 trades, 67% win rate, +$342 realized, 0.003 PHRS gas. Verdict healthy. Tuning recommendation: raise `size_usd` 1000 → 1250 (conf 0.60)."
 
-## Error handling
+## General error handling
 
-| Error                  | Cause                          | Action |
-|------------------------|--------------------------------|--------|
-| `journal not found`    | First run                      | Create an empty journal via `recimp record --strategy init` |
-| `tx not found`         | Wrong hash or chain            | Tell the user; entry stays "pending" in the journal |
-| `rpc unreachable`      | Bad / dead RPC URL             | Ask user for a working RPC |
-| `insufficient data`    | < 5 trades in the strategy     | Verdict returns `INSUFFICIENT_DATA`; no tuning proposed |
+| Error scenario | CLI signature | Handling |
+|---|---|---|
+| Journal doesn't exist yet | `{'checked': 0, 'note': 'journal not found'}` | First-run case; call `record` first to bootstrap |
+| RPC unreachable | Exit code 3 (`RpcError`) | Ask user for a working RPC URL |
+| Bad RPC URL | HTTP error wrapped in `RpcError` | Same as above |
+| RPC rate-limited (HTTP 429) | Auto-retry with exponential backoff (0.4s / 0.8s / 1.6s / 3.2s) | Built-in; surface result if it still fails after 4 retries |
+| `<5` closes for a strategy | `verdict: INSUFFICIENT_DATA` | Normal — advisor returns no recommendations |
+| `--format` typo | argparse usage error | Built-in |
+| Missing required `--strategy` | argparse usage error | Built-in |
+
+## Security reminders
+
+- **Private key protection** — the skill is read-only and never accepts a private key. Do not paste keys into chat.
+- **Network confirmation** — `verify` writes to disk but does not write onchain. If a future version adds a write path, confirm the network (`mainnet` vs `testnet`) with the user before running.
+- **No external API** — the skill talks only to whatever JSON-RPC endpoint you give it via `--rpc-url`. No third-party services.
+- **Journal is local** — the JSONL journal is local to the runtime. For production, back it up to durable storage (S3 / IPFS) before the agent's host dies.
+
+## Write operation pre-checks
+
+This skill is **read-only** and never submits a transaction, so the full 4-step write pre-check is **not applicable**. If a future version adds a write path, the pre-checks must include:
+
+1. **Private Key Check** — `--private-key` / `$PRIVATE_KEY` must be set; warn if the key has zero balance.
+2. **Derive Public Address** — `cast wallet address`; confirm the key is for the intended network.
+3. **Network Confirmation** — prompt the user with "You are about to write to Pacific mainnet. Continue? (y/N)".
+4. **Automatic Balance Check** — `cast balance`; if below the operation cost + gas, abort with a clear error.
 
 ## Limitations
 
-- P&L is computed from agent-supplied `--pnl-usd` values, not
-  re-derived from on-chain state. The verifier only checks
-  *whether* a tx confirmed, not *what* the price was.
-- The tuning advisor is rule-based. It will not catch regime
-  changes (bull vs bear), sudden liquidity events, or
-  protocol-specific exploits. Treat its output as one input,
-  not a final answer.
-- The journal is local. If the agent's host dies, the journal
-  dies with it. Back up `data/journal.jsonl` to a durable
-  store (S3, IPFS) in production.
-
-## Prerequisites
-
-```bash
-python3 --version   # 3.10+
-```
-
-The skill uses only the Python standard library (`urllib.request`,
-`json`, `argparse`). No third-party packages, no Foundry, no
-`pip install` step.
-
-The skill is **read-only** — no private key is required or accepted.
-
-## Network Configuration
-
-Network RPC URLs and chain IDs are sourced from
-`assets/networks.json` (canonical Pharos Skill Engine schema). To
-add a new network, append a new object to the `networks` array and
-update `defaultNetwork` if needed.
-
-## Capability Index
-
-| User Need | Capability | Detailed Instructions |
-|---|---|---|
-| Default entry point | CLI with a `--wallet` / `--safe` / `--governor` flag | See the `Usage` section in the README; the CLI takes a target identifier and prints a Markdown or JSON report |
-| JSON for an agent | `--format json` | Output is a structured payload that an agent can import directly |
-| Markdown report | pipe to `report.py` | `python3 src/... --format json \| python3 src/report.py --format markdown --out X.md` |
-| Bounded scan | `--max-blocks` / `--lookback` / `--block-count` | Default scans are bounded to stay within the public Pharos RPC's request rate |
-| Network switch | `--chain mainnet\|testnet` | Default is Atlantic testnet; pass `--chain mainnet` to switch |
-
-## General Error Handling
-
-| Error Scenario | CLI Error Signature | Handling |
-|---|---|---|
-| Target not on the specified chain | `null` receipt / no data returned | Exit with "not found on chain=X; try `--chain <other>`" |
-| RPC rate-limited (HTTP 429) | Backoff response from RPC | Built-in exponential backoff (0.4s, 0.8s, 1.6s, 3.2s) with 4 retry attempts |
-| Bad target format | Validator rejects the input | CLI prints a usage hint; no RPC call is made |
-| Missing required arg | `argparse` exits with usage | CLI prints required args; user re-invokes with the right flags |
-| No matches (clean target) | Empty result / `verdict: clean` | Normal case — emit the "no issues" report, no error |
-
-## Security Reminders
-
-- **Private Key Protection** — the skill is read-only and never
-  accepts a private key. Do not paste keys into chat.
-- **Network Confirmation** — before any future write-skill
-  integration, confirm the network with the user.
-- **No External API** — the skill does not call any third-party
-  service beyond the Pharos RPC and PharosScan (where applicable).
-  All data is fetched directly.
-
-## Write Operation Pre-checks
-
-This skill is **read-only** and never submits a transaction, so the
-full 4-step write pre-check is not applicable. If a future version
-adds a write path, the pre-checks must include:
-
-1. **Private Key Check** — `--private-key` / `$PRIVATE_KEY` must be
-   set; warn if the key has zero balance.
-2. **Derive Public Address** — `cast wallet address`; confirm the
-   key is for the intended network.
-3. **Network Confirmation** — prompt the user with "You are about
-   to write to Pacific mainnet. Continue? (y/N)".
-4. **Automatic Balance Check** — `cast balance`; if below the
-   operation cost + gas, abort with a clear error.
+- `pnl_usd` is whatever the agent (or upstream trading engine) reports at close time. The verifier only checks **whether** a tx confirmed, not **what** the price was. Re-deriving P&L from on-chain Transfer events is on the roadmap but not implemented.
+- Verdict thresholds (5 closes, 40% / 50% WR) are opinionated and live in `src/reflection.py:_verdict`.
+- Advisory rules are static, additive, and don't resolve conflicts (a strategy can get "tighten stop" and "scale up" simultaneously — pick one).
+- The advisor does not adapt to regime changes (bull vs bear, sudden liquidity events, protocol-specific exploits).
+- Window is inclusive — `--window 0` disables it; default is `30` days.
